@@ -32,9 +32,11 @@ services:
       - /mnt/user/appdata/server-schedule/data:/data
     environment:
       - TZ=America/Chicago
+      - PUID=99
+      - PGID=100
 ```
 
-The container runs as UID 1000. If the data folder is owned by someone else (Unraid defaults to `nobody:users`, 99:100), either `chown 1000:1000` the folder or add `user: "99:100"` to the service.
+On start the container fixes ownership of `/data` to `PUID:PGID`, then runs the app as that user. Use `99`/`100` on Unraid (nobody:users) or `1000`/`1000` elsewhere. Don't also set `user:` on the service; that skips the ownership fix.
 
 ## Security
 

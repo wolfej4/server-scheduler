@@ -34,7 +34,17 @@ def conn():
 
 
 def init_db():
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    folder = Path(DB_PATH).parent
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    if not os.access(folder, os.W_OK):
+        raise SystemExit(
+            f"Can't write to {folder} as UID {os.getuid()}. "
+            f"Fix the host folder's ownership (chown {os.getuid()}:{os.getgid()} <folder>) "
+            "or set PUID/PGID to match the folder's owner."
+        )
     with conn() as c:
         c.execute("PRAGMA journal_mode=WAL")
         c.execute(

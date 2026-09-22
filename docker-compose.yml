@@ -10,3 +10,6 @@ services:
       - ./data:/data
     environment:
       - TZ=America/Chicago
+      # Owner of the data folder. Unraid appdata convention is 99/100.
+      - PUID=1000
+      - PGID=1000
