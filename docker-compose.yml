@@ -1,0 +1,12 @@
+services:
+  server-schedule:
+    build: .
+    image: server-schedule:latest
+    container_name: server-schedule
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - TZ=America/Chicago
