@@ -121,6 +121,7 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important}
 .nm.covh{border-top:2px solid var(--line)}
 .cov{display:flex;align-items:center;gap:6px;font-size:13px}
 .cov i{width:9px;height:9px;border-radius:2px;background:var(--c);flex:none}
+.covopen{font-size:12.5px;color:var(--bad);margin:-1px 0 3px}
 .cov b{margin-left:auto;font-variant-numeric:tabular-nums}
 .cov.under b{color:var(--bad)}
 .cov.over b{color:var(--warn)}
@@ -250,12 +251,8 @@ function lset(k,v){try{localStorage.setItem('srvsched:'+k,JSON.stringify(v))}cat
 function defaultConfig(){return{
   servers:[],
   periods:[{id:'am',name:'Morning'},{id:'pm',name:'Night'}],
-  shifts:[
-    {id:'open',name:'Opener',period:'am',start:'10:30',end:'',color:'#EE9F3C',opens:true,closes:false,targets:[1,1,1,1,1,1,1]},
-    {id:'am1045',name:'Morning',period:'am',start:'10:45',end:'',color:'#F4C85A',opens:false,closes:false,targets:[2,2,2,2,2,2,2]},
-    {id:'am1100',name:'Morning',period:'am',start:'11:00',end:'',color:'#F8E08E',opens:false,closes:false,targets:[2,2,2,2,2,2,2]},
-    {id:'night',name:'Night',period:'pm',start:'16:00',end:'',color:'#79A6F2',opens:false,closes:true,targets:[4,4,4,4,4,4,4]}
-  ],
+  tpl:2,
+  shifts:[{"id":"am20","name":"20","period":"am","start":"10:30","end":"15:45","color":"#EE9F3C","opens":true,"closes":false,"targets":[1,1,1,1,1,1,1]},{"id":"am25","name":"25","period":"am","start":"10:45","end":"15:45","color":"#F4C85A","opens":false,"closes":false,"targets":[1,1,1,1,1,1,1]},{"id":"am27","name":"27","period":"am","start":"10:45","end":"15:45","color":"#F4C85A","opens":false,"closes":false,"targets":[1,1,1,1,1,1,1]},{"id":"am31","name":"31","period":"am","start":"10:45","end":"15:45","color":"#F4C85A","opens":false,"closes":false,"targets":[0,1,0,0,0,0,0]},{"id":"am29","name":"29","period":"am","start":"11:00","end":"15:45","color":"#F8E08E","opens":false,"closes":false,"targets":[1,1,1,1,1,1,1]},{"id":"am35","name":"35","period":"am","start":"11:00","end":"15:45","color":"#F8E08E","opens":false,"closes":false,"targets":[1,1,1,1,1,1,1]},{"id":"pm20","name":"20","period":"pm","start":"15:45","end":"23:30","color":"#79A6F2","opens":false,"closes":true,"targets":[1,1,1,1,1,1,1]},{"id":"pm25","name":"25","period":"pm","start":"15:45","end":"23:30","color":"#79A6F2","opens":false,"closes":true,"targets":[1,1,1,1,1,1,1]},{"id":"pm27","name":"27","period":"pm","start":"15:45","end":"23:30","color":"#79A6F2","opens":false,"closes":true,"targets":[1,1,1,1,1,1,1]},{"id":"pm29","name":"29","period":"pm","start":"15:45","end":"23:30","color":"#79A6F2","opens":false,"closes":true,"targets":[1,1,1,1,1,1,1]},{"id":"pm31","name":"31","period":"pm","start":"15:45","end":"23:30","color":"#79A6F2","opens":false,"closes":true,"targets":[1,1,1,1,1,1,1]},{"id":"pm35","name":"35","period":"pm","start":"15:45","end":"23:00","color":"#A8C4F7","opens":false,"closes":true,"targets":[1,1,1,1,1,1,1]},{"id":"pm24","name":"24","period":"pm","start":"15:45","end":"23:30","color":"#C4B5F0","opens":false,"closes":true,"targets":[0,0,0,0,0,1,1]}],
   rules:{weekStart:1,maxConsecutive:5,noClopen:true,blockUnavailable:false}
 }}
 function normCfg(c){
@@ -266,6 +263,8 @@ function normCfg(c){
   c.periods=Array.isArray(c.periods)&&c.periods.length?c.periods:d.periods;
   c.shifts=Array.isArray(c.shifts)?c.shifts:d.shifts;
   c.shifts.forEach(s=>{s.id=s.id||uid();if(!c.periods.some(p=>p.id===s.period))s.period=c.periods[0].id;s.start=s.start||'11:00';s.end=s.end||'';if(!Array.isArray(s.targets)||s.targets.length!==7)s.targets=[0,0,0,0,0,0,0];s.targets=s.targets.map(n=>Math.max(0,+n||0));s.color=/^#[0-9a-f]{6}$/i.test(s.color)?s.color:'#CCCCCC'});
+  const legacy=['lunch','mid','dinner','close','open','am1045','am1100','night'];
+  if(!c.tpl){if(c.shifts.every(s=>legacy.includes(s.id)))c.shifts=clone(d.shifts);c.tpl=2}
   c.rules=Object.assign({},d.rules,c.rules||{});
   c.rules.weekStart=+c.rules.weekStart===0?0:1;
   return c;
@@ -636,7 +635,7 @@ function renderSchedule(){
     $('#main').innerHTML=h;return;
   }
   h+='<section class="palette"><div class="chips">'+cfg.shifts.map(sh=>'<div class="chip src'+(armed===sh.id?' armed':'')+'" role="button" tabindex="0" aria-pressed="'+(armed===sh.id)+'" data-shift="'+sh.id+'" style="--c:'+sh.color+'"><span class="cn">'+esc(sh.name)+'</span><span class="ct">'+range(sh)+'</span></div>').join('')+'<button class="newshift" data-a="newShift">+ New shift</button></div>'
-   +'<p class="hint">'+(armed?'Tap a day on the board to place '+esc(shf(armed).name)+'. Tap the shift again to stop.':'Drag a shift onto a server’s day, or tap a shift and then tap the days. Drag placed shifts to move them.')+'</p></section>';
+   +'<p class="hint">'+(armed?'Tap a day on the board to place '+esc(shf(armed).name)+'. Tap the shift again to stop.':'Each tile is a section and its times. Drag one onto a server’s day, or tap a tile and then tap the days. Drag placed shifts to move them.')+'</p></section>';
   if(!cfg.servers.length){
     h+='<div class="empty"><h2>Add your servers to start the week</h2><p>Enter each server with their availability and limits, then drag shifts onto the board.</p><div class="row"><button class="primary" data-go="servers">Add servers</button><button data-a="importHS">Import from HotSchedules</button><button data-a="sample">Try it with a sample crew</button></div></div>';
     $('#main').innerHTML=h;return;
@@ -652,7 +651,9 @@ function renderSchedule(){
       g+='<div class="cell'+(off?' off':'')+'" data-sid="'+s.id+'" data-date="'+d+'" tabindex="0" aria-label="'+esc((s.name||'Unnamed')+', '+DOWL[dw])+(off?', can’t work':'')+'">'+(st.byDate[d]||[]).map(a=>chipPlaced(a,H[a.shift],A.ai[a.id])).join('')+'</div>';
     });
   });
-  g+='<div class="nm covh"><div class="nmn">Coverage</div><div class="nmm">placed / needed</div></div>'+dates.map(d=>{const dw=dowOf(d);return '<div class="covcell">'+cfg.shifts.map(sh=>{const t=sh.targets[dw]||0,c=A.cov[d][sh.id];if(!t&&!c)return '';return '<div class="cov '+(c<t?'under':c>t?'over':'met')+'"><i style="--c:'+sh.color+'"></i><span>'+esc(slabel(sh))+'</span><b>'+c+'/'+t+'</b></div>'}).join('')+'</div>'}).join('');
+  g+='<div class="nm covh"><div class="nmn">Coverage</div><div class="nmm">placed / needed</div></div>'+dates.map(d=>{const dw=dowOf(d);return '<div class="covcell">'+cfg.periods.map(p=>{const list=cfg.shifts.filter(sh=>sh.period===p.id);let t=0,c=0;const open=[];
+      list.forEach(sh=>{const tt=sh.targets[dw]||0,cc=A.cov[d][sh.id];t+=tt;c+=cc;if(cc<tt)open.push(tt-cc>1?sh.name+' ×'+(tt-cc):sh.name)});
+      if(!t&&!c)return '';return '<div class="cov '+(open.length?'under':c>t?'over':'met')+'"><span>'+esc(p.name)+'</span><b>'+c+'/'+t+'</b></div>'+(open.length?'<div class="covopen">Open: '+esc(open.join(', '))+'</div>':'')}).join('')+'</div>'}).join('');
   h+='<div class="board" id="board"><div class="grid">'+g+'</div></div>';
   h+='<section class="checks"><h3>Things to check</h3><p>'+(A.open?A.open+' open '+(A.open===1?'spot':'spots')+' left to hit your staffing targets.':'Every shift is staffed to target.')+'</p>'
    +(A.items.length?'<ul>'+A.items.map(i=>'<li><b>'+esc(A.S[i.sid].name||'Unnamed')+'</b> '+esc(i.msg)+'</li>').join('')+'</ul>':'<p class="muted">No conflicts with availability or your rules.</p>')+'</section>';
