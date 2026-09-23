@@ -24,7 +24,6 @@ Data lives in `./data` next to the compose file. Back it up like any other volum
 services:
   server-schedule:
     image: server-schedule:latest
-    pull_policy: never
     container_name: server-schedule
     restart: unless-stopped
     ports:
@@ -36,8 +35,6 @@ services:
       - PUID=99
       - PGID=100
 ```
-
-The image only exists on your host (it's not on Docker Hub), so `pull_policy: never` stops Docker from trying to download it. For the same reason, leave **Re-pull image** switched off when you update the stack or recreate the container in Portainer; otherwise it fails with `pull access denied for server-schedule`.
 
 On start the container fixes ownership of `/data` to `PUID:PGID`, then runs the app as that user. Use `99`/`100` on Unraid (nobody:users) or `1000`/`1000` elsewhere. Don't also set `user:` on the service; that skips the ownership fix.
 

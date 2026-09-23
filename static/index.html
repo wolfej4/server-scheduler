@@ -185,6 +185,11 @@ td input[type=text]{width:9em}
 .mbox{background:var(--board);border-radius:12px;padding:18px;width:min(560px,100%);display:grid;gap:14px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
 .mbox p{margin:0}
 .mbox textarea{width:100%;min-height:280px;font-size:13.5px;line-height:1.5}
+.mbox.wide{width:min(980px,100%);max-height:calc(100vh - 32px);overflow:auto}
+.hsprev{min-width:720px;font-size:13px}
+.hsprev td,.hsprev th{padding:5px 7px}
+.hsprev td:nth-child(n+3):not(:last-child){text-align:center;font-weight:600;font-family:'Barlow Condensed',sans-serif;font-size:15px}
+.hsprev td.hsoff{color:var(--muted);background:repeating-linear-gradient(135deg,var(--hatch) 0 4px,transparent 4px 8px)}
 .mact{display:flex;justify-content:flex-end;gap:8px}
 @media (max-width:640px){
   .bar{gap:8px 14px}
@@ -528,6 +533,75 @@ function newShiftModal(){
   });
 }
 
+/* ---------- HotSchedules import ---------- */
+function parseCSV(text){const rows=[];let row=[],f='',q=false;text=text.replace(/^\uFEFF/,'');
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c==='"')q=true;else if(c===','){row.push(f);f=''}
+    else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;row.push(f);rows.push(row);row=[];f=''}
+    else f+=c}
+  if(f!==''||row.length){row.push(f);rows.push(row)}
+  return rows.filter(r=>r.some(x=>x.trim()!==''))}
+function hm12(s){const m=/(\d{1,2}):(\d{2})\s*([AP])M/i.exec(s);if(!m)return null;let h=+m[1]%12;if(m[3].toUpperCase()==='P')h+=12;return h*60+ +m[2]}
+function hmStr(m){m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')}
+function parseHSCell(v){v=(v||'').trim();if(!v)return{kind:'missing'};
+  if(/^unavailable/i.test(v))return{kind:'none'};if(/^available all day/i.test(v))return{kind:'all'};
+  const m=/(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(\d{1,2}:\d{2}\s*[AP]M)/i.exec(v);
+  if(m){const a=hm12(m[1]);let b=hm12(m[2]);if(b<=a)b+=1440;return{kind:'part',a,b,text:m[1]+'–'+m[2]}}
+  return{kind:'unknown',text:v}}
+function parseHS(text){
+  const rows=parseCSV(text);if(!rows.length)return null;
+  let hi=rows.findIndex(r=>r.some(c=>/^\s*(sun|mon|tue|wed|thu|fri|sat)/i.test(c)));if(hi<0)return null;
+  const cols=rows[hi].map(c=>{const m=/^\s*(sun|mon|tue|wed|thu|fri|sat)/i.exec(c);return m?DOW.findIndex(d=>d.toLowerCase()===m[1].toLowerCase()):-1});
+  if(cols.filter(x=>x>=0).length<1)return null;
+  const people=[];
+  rows.slice(hi+1).forEach(r=>{const name=(r[0]||'').trim();if(!name||/^employees?$/i.test(name))return;
+    const days=Array.from({length:7},()=>({kind:'missing'}));
+    cols.forEach((dw,i)=>{if(dw>=0&&i>0)days[dw]=parseHSCell(r[i])});
+    people.push({name,days})});
+  return people.length?people:null}
+function hsDefaults(){const o={};cfg.periods.forEach(p=>{const st=cfg.shifts.filter(s=>s.period===p.id).map(s=>mins(s.start));
+  const lo=st.length?Math.min(...st):0,hi=st.length?Math.max(...st):0;o[p.id]={by:Math.min(hi+60,1439),until:Math.min(lo+240,1439)}});return o}
+function hsFits(cell,r){if(cell.kind==='all'||cell.kind==='missing'||cell.kind==='unknown')return true;if(cell.kind==='none')return false;
+  let until=r.until;if(until<r.by)until+=1440;return cell.a<=r.by&&cell.b>=until}
+function pickImport(){const inp=document.createElement('input');inp.type='file';inp.accept='.csv,text/csv';
+  inp.onchange=async()=>{const f=inp.files[0];if(!f)return;const people=parseHS(await f.text());
+    if(!people){toast('That doesn’t look like a HotSchedules Availability Report export.');return}openImport(people)};inp.click()}
+function openImport(people){
+  const rules=hsDefaults();const days=Array.from({length:7},(_,i)=>(cfg.rules.weekStart+i)%7);
+  const known=new Set(cfg.servers.map(s=>(s.name||'').trim().toLowerCase()));
+  const ruleHtml=cfg.periods.map(p=>'<label>'+esc(p.name)+' if available by <input type="time" data-hsby="'+p.id+'" value="'+hmStr(rules[p.id].by)+'"> and until at least <input type="time" data-hsuntil="'+p.id+'" value="'+hmStr(rules[p.id].until)+'"></label>').join('');
+  modal('<h3>Import from HotSchedules</h3><p class="muted">'+people.length+' people found. Partial availability counts for a period only if it covers these times. “All day” counts for everything.</p><div class="rules" style="padding:10px">'+ruleHtml+'<label><input type="checkbox" id="hsRemove"> Remove servers who aren’t in this file</label></div><div class="tablewrap"><table class="hsprev" id="hsPrev"></table></div><div class="mact"><button data-m="cancel">Cancel</button><button data-m="ok" class="primary">Import '+people.length+' servers</button></div>',m=>{
+    $('.mbox',m).classList.add('wide');
+    const initials=cfg.periods.map(p=>p.name.slice(0,1).toUpperCase());
+    function draw(){
+      let h='<thead><tr><th>Name</th><th></th>'+days.map(d=>'<th>'+DOW[d]+'</th>').join('')+'<th>Notes</th></tr></thead><tbody>';
+      people.forEach(pp=>{const notes=[];
+        h+='<tr><td>'+esc(pp.name)+'</td><td class="muted">'+(known.has(pp.name.toLowerCase())?'Update':'New')+'</td>'+days.map(d=>{const c=pp.days[d];
+          const on=cfg.periods.map((p,i)=>hsFits(c,rules[p.id])?initials[i]:'').filter(Boolean);
+          if(c.kind==='part'&&!on.length)notes.push(DOW[d]+' '+c.text+' fits no period');
+          if(c.kind==='missing')notes.push('No data for '+DOW[d]);
+          if(c.kind==='unknown')notes.push(DOW[d]+': '+c.text);
+          return '<td class="'+(on.length?'':'hsoff')+'" title="'+esc(c.text||(c.kind==='all'?'Available all day':c.kind==='none'?'Unavailable':''))+'">'+(on.length?on.join(' '):'–')+'</td>'}).join('')+'<td class="muted">'+esc(notes.join('; '))+'</td></tr>'});
+      $('#hsPrev',m).innerHTML=h+'</tbody>'}
+    draw();
+    $$('[data-hsby],[data-hsuntil]',m).forEach(inp=>inp.addEventListener('input',()=>{if(!inp.value)return;const k=inp.dataset.hsby?'by':'until';rules[inp.dataset.hsby||inp.dataset.hsuntil][k]=mins(inp.value);draw()}));
+    $('[data-m=cancel]',m).onclick=closeModal;
+    $('[data-m=ok]',m).onclick=()=>{const rm=$('#hsRemove',m).checked;closeModal();applyImport(people,rules,rm)};
+  })}
+function applyImport(people,rules,removeMissing){
+  let added=0,updated=0,removed=0;const seen=new Set();
+  people.forEach(pp=>{const key=pp.name.toLowerCase();seen.add(key);
+    let s=cfg.servers.find(x=>(x.name||'').trim().toLowerCase()===key);const isNew=!s;
+    if(!s){s={id:uid(),name:pp.name,min:0,max:0,doubles:false,notes:'',avail:{}};cfg.servers.push(s)}
+    const old=s.avail||{},nav={};
+    for(let dw=0;dw<7;dw++)cfg.periods.forEach(p=>{const ok=hsFits(pp.days[dw],rules[p.id]);const prev=old[dw]&&old[dw][p.id];
+      if(!ok)(nav[dw]=nav[dw]||{})[p.id]='no';else if(prev==='pref')(nav[dw]=nav[dw]||{})[p.id]='pref'});
+    s.avail=nav;isNew?added++:updated++});
+  if(removeMissing){const before=cfg.servers.length;cfg.servers=cfg.servers.filter(s=>seen.has((s.name||'').trim().toLowerCase()));removed=before-cfg.servers.length}
+  persistCfg();render();
+  toast('Imported: '+added+' new, '+updated+' updated'+(removed?', '+removed+' removed':'')+'. Set min/max shifts and doubles under Servers.')}
+
 /* ---------- ui helpers ---------- */
 let toastT;
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3600)}
@@ -564,7 +638,7 @@ function renderSchedule(){
   h+='<section class="palette"><div class="chips">'+cfg.shifts.map(sh=>'<div class="chip src'+(armed===sh.id?' armed':'')+'" role="button" tabindex="0" aria-pressed="'+(armed===sh.id)+'" data-shift="'+sh.id+'" style="--c:'+sh.color+'"><span class="cn">'+esc(sh.name)+'</span><span class="ct">'+range(sh)+'</span></div>').join('')+'<button class="newshift" data-a="newShift">+ New shift</button></div>'
    +'<p class="hint">'+(armed?'Tap a day on the board to place '+esc(shf(armed).name)+'. Tap the shift again to stop.':'Drag a shift onto a server’s day, or tap a shift and then tap the days. Drag placed shifts to move them.')+'</p></section>';
   if(!cfg.servers.length){
-    h+='<div class="empty"><h2>Add your servers to start the week</h2><p>Enter each server with their availability and limits, then drag shifts onto the board.</p><div class="row"><button class="primary" data-go="servers">Add servers</button><button data-a="sample">Try it with a sample crew</button></div></div>';
+    h+='<div class="empty"><h2>Add your servers to start the week</h2><p>Enter each server with their availability and limits, then drag shifts onto the board.</p><div class="row"><button class="primary" data-go="servers">Add servers</button><button data-a="importHS">Import from HotSchedules</button><button data-a="sample">Try it with a sample crew</button></div></div>';
     $('#main').innerHTML=h;return;
   }
   const today=ymd(new Date());
@@ -590,10 +664,10 @@ function renderSchedule(){
 
 function renderServers(){
   const days=Array.from({length:7},(_,i)=>(cfg.rules.weekStart+i)%7);
-  let h='<section class="page"><div class="pagehead"><h2>Servers</h2><button class="primary" data-a="addServer">Add server</button></div>'
+  let h='<section class="page"><div class="pagehead"><h2>Servers</h2><div class="actions"><button data-a="importHS">Import from HotSchedules</button><button class="primary" data-a="addServer">Add server</button></div></div>'
    +'<p class="hint">Set availability by morning and night. Tap a slot to switch between available, prefers it, and can’t work. Tap a day name to block or open the whole day.</p>'
    +'<div class="legend" style="margin-bottom:14px"><span><span class="av" data-v="yes"></span>Available</span><span><span class="av" data-v="pref">★</span>Prefers</span><span><span class="av" data-v="no">✕</span>Can’t work</span></div>';
-  if(!cfg.servers.length)h+='<div class="empty"><h2>No servers yet</h2><p>Add each server with the days and shifts they can work.</p><div class="row"><button class="primary" data-a="addServer">Add server</button><button data-a="sample">Add a sample crew</button></div></div>';
+  if(!cfg.servers.length)h+='<div class="empty"><h2>No servers yet</h2><p>Add each server with the days and shifts they can work.</p><div class="row"><button class="primary" data-a="importHS">Import from HotSchedules</button><button data-a="addServer">Add server</button><button data-a="sample">Add a sample crew</button></div></div>';
   h+='<div class="cards">'+cfg.servers.map((s,idx)=>{
     let av='<div></div>'+days.map(d=>'<button class="avday" data-dow="'+d+'" aria-label="Toggle all of '+DOWL[d]+'">'+DOW[d]+'</button>').join('');
     cfg.periods.forEach(p=>{
@@ -669,6 +743,7 @@ $('#main').addEventListener('click',e=>{
       case 'delServer':{const s=srv(card.dataset.sid);confirmBox('Remove '+(s.name||'this server')+'? Their shifts disappear from the board.','Remove',()=>{cfg.servers=cfg.servers.filter(x=>x.id!==s.id);week.assignments=week.assignments.filter(x=>x.sid!==s.id);persistCfg();persistWeek();renderServers()});return}
       case 'addShift':{cfg.shifts.push({id:uid(),name:'New shift',period:cfg.periods[0].id,start:'11:00',end:'',color:'#B9A3E3',opens:false,closes:false,targets:[0,0,0,0,0,0,0]});persistCfg();renderSetup();return}
       case 'newShift':newShiftModal();return;
+      case 'importHS':pickImport();return;
       case 'addPeriod':{cfg.periods.push({id:uid(),name:'New period'});persistCfg();renderSetup();return}
       case 'delPeriod':{const pid=a.closest('[data-pid]').dataset.pid;if(cfg.periods.length<2){toast('Keep at least one period.');return}if(cfg.shifts.some(x=>x.period===pid)){toast('Move or remove the shifts in '+pname(pid)+' first.');return}cfg.periods=cfg.periods.filter(x=>x.id!==pid);persistCfg();renderSetup();return}
       case 'delShift':{const sh=shf(row.dataset.shid);confirmBox('Remove '+sh.name+'? Any '+sh.name+' shifts already on the board will disappear.','Remove',()=>{cfg.shifts=cfg.shifts.filter(x=>x.id!==sh.id);week.assignments=week.assignments.filter(x=>x.shift!==sh.id);persistCfg();persistWeek();renderSetup()});return}
